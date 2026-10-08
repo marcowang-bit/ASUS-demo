@@ -1,0 +1,94 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>專櫃例行單據上傳系統 POC</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#f7f5f0;--card:#fff;--tx:#14213d;--mu:#6a7179;--ac:#e07a1f;--ok:#1f7a8c;--bad:#c0392b;--bd:#ddd8cc}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#10172a;--card:#1a2340;--tx:#f0efe9;--mu:#a3abbb;--bd:#2f3a5c}}
+:root[data-theme="dark"]{--bg:#10172a;--card:#1a2340;--tx:#f0efe9;--mu:#a3abbb;--bd:#2f3a5c}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:'Noto Sans TC',-apple-system,'PingFang TC','Microsoft JhengHei',sans-serif;line-height:1.5}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--bd)}
+h1{font-size:18px;margin:0}main{max-width:1000px;margin:0 auto;padding:20px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:16px}
+button,select,input{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:8px 12px}
+button.p{background:var(--ac);color:#fff;border-color:var(--ac);cursor:pointer}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.tbl{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px}th,td{padding:8px;border-bottom:1px solid var(--bd);text-align:left;white-space:nowrap}
+.tag{padding:2px 8px;border-radius:99px;font-size:12px;color:#fff}.ok{background:var(--ok)}.bad{background:var(--bad)}.opt{background:var(--mu)}
+.chk{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}.chk div{border:1px solid var(--bd);border-radius:8px;padding:8px}
+button.ic{padding:4px 8px;cursor:pointer;line-height:0}.ex{margin:10px 0}img.th{height:44px;border-radius:4px}.mu{color:var(--mu);font-size:13px}
+</style></head><body>
+<header><h1>遠雄｜專櫃例行單據上傳系統 <span class="mu">POC（模擬資料）</span></h1>
+<div class="row"><label>登入角色 <select id="role"><option value="shop">專櫃</option><option value="biz">營業管理者</option><option value="fin">財務管理者</option></select></label><span id="who"></span></div></header>
+<main id="app"></main>
+<script>if(!window.claude)window.claude={use:function(){return Promise.resolve({save:function(o){var b=o.data instanceof Blob?o.data:new Blob([o.data]);var a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=o.filename;document.body.appendChild(a);a.click();a.remove();return Promise.resolve({status:"saved"})}})}}</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+var TYPES=[["pos","① POS清機條",1],["land","② 土銀結帳條",1],["nccc","③ 聯合結帳條",1],["atm","④ 入金機收據",1],["slip","⑤ 信用卡紙本簽單",0],["gift","⑥ 現金禮券",0],["void","⑦ 作廢發票明細表",0]];
+var STORES=["汐止店","台中店","新竹店"];
+var today=new Date().toISOString().slice(0,10);
+var shops=[{id:"A101",name:"示範專櫃甲",store:"汐止店",pw:"1234"},{id:"A102",name:"示範專櫃乙",store:"汐止店",pw:"1234"},{id:"T201",name:"示範專櫃丙",store:"台中店",pw:"1234"},{id:"H301",name:"示範專櫃丁",store:"新竹店",pw:"1234"}];
+var recs=[];
+function seed(){var d=new Date(Date.now()-864e5).toISOString().slice(0,10);
+ shops.forEach(function(s,i){TYPES.forEach(function(t){if(t[2]&&!(i==1&&t[0]=="atm"))recs.push({d:d,shop:s.id,type:t[0],st:"已收件",img:"",note:""})})})}
+seed();
+var cur={shop:"A101"};
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function tname(k){return TYPES.filter(function(t){return t[0]==k})[0][1]}
+function shop(id){return shops.filter(function(s){return s.id==id})[0]||{name:"?",store:"?"}}
+function render(){var r=document.getElementById("role").value;
+ document.getElementById("who").textContent=r=="shop"?"專櫃："+shop(cur.shop).name:r=="biz"?"可查詢、新增專櫃":"最大權限：查詢／編輯／新增";
+ document.getElementById("app").innerHTML=r=="shop"?vShop():vAdmin(r)}
+function vShop(){var s=shop(cur.shop),mine=recs.filter(function(x){return x.shop==cur.shop});
+ var opts=shops.map(function(x){return '<option value="'+x.id+'"'+(x.id==cur.shop?" selected":"")+'>'+x.id+" "+esc(x.name)+'</option>'}).join("");
+ var chk=TYPES.map(function(t){var n=mine.filter(function(x){return x.d==today&&x.type==t[0]}).length;
+  return '<div>'+t[1]+'<br><span class="tag '+(n?"ok":t[2]?"bad":"opt")+'">'+(n?"今日已上傳 "+n:t[2]?"每日必要・未上傳":"有使用才需上傳")+'</span></div>'}).join("");
+ var to=TYPES.map(function(t){return '<option value="'+t[0]+'">'+t[1]+'</option>'}).join("");
+ return '<div class="card"><div class="row"><label>模擬登入帳號 <select onchange="cur.shop=this.value;render()">'+opts+'</select></label><span class="mu">'+esc(s.store)+'・帳號密碼驗證（POC 以下拉選單模擬）</span></div></div>'+
+ '<div class="card"><b>今日（'+today+'）帳袋清單</b><div class="chk" style="margin-top:10px">'+chk+'</div></div>'+
+ '<div class="card"><b>上傳單據</b><div class="row" style="margin-top:10px"><select id="ut">'+to+'</select><input id="uf" type="file" accept="image/*" capture="environment"><button class="p" onclick="up()">上傳</button></div><div class="mu">提醒：信用卡簽單請先核對張數再清機；作廢發票未繳回將業績還原。</div></div>'+
+ '<div class="card"><div class="row" style="justify-content:space-between"><b>我的上傳紀錄</b><button class="ic" title="匯出 EXCEL" aria-label="匯出 EXCEL" onclick="exp.open=!exp.open;render()">'+XI+'</button></div>'+(exp.open?'<div class="row ex"><label>起 <input type="date" value="'+exp.from+'" onchange="exp.from=this.value"></label><label>迄 <input type="date" value="'+exp.to+'" onchange="exp.to=this.value"></label><button class="p" onclick="doExp()">匯出 .xlsx</button><span class="mu" id="exm"></span></div>':'')+tbl(mine,false)+'</div>'}
+var exp={open:false,aopen:false,store:'',from:today,to:today};
+var XI='<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3" fill="#1d7a45"/><path d="M8 8l8 8M16 8l-8 8" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>';
+function doExp(){var m=document.getElementById("exm");
+ if(exp.from>exp.to){m.textContent="起日不可晚於迄日";return}
+ var a=recs.filter(function(x){return x.shop==cur.shop&&x.d>=exp.from&&x.d<=exp.to}).reverse();
+ if(!a.length){m.textContent="此區間無資料";return}
+ var rows=[["日期","專櫃編號","專櫃名稱","門店","單據類型","狀態","是否有影像"]].concat(a.map(function(x){var s=shop(x.shop);return [x.d,x.shop,s.name,s.store,tname(x.type),x.st,x.img?"是":"否"]}));
+ var name="上傳紀錄_"+cur.shop+"_"+exp.from+"_"+exp.to,data,fn;
+ if(window.XLSX){var ws=XLSX.utils.aoa_to_sheet(rows),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"上傳紀錄");data=new Blob([XLSX.write(wb,{bookType:"xlsx",type:"array"})]);fn=name+".xlsx"}
+ else{data="\ufeff"+rows.map(function(r){return r.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"'}).join(",")}).join("\n");fn=name+".csv"}
+ claude.use("downloads").then(function(d){if(!d){m.textContent="目前環境不支援下載";return}
+  d.save({filename:fn,data:data}).then(function(){m.textContent="已匯出 "+a.length+" 筆"},function(e){m.textContent=e.code=="declined"?"已取消":"匯出失敗："+e.code})},function(){m.textContent="目前環境不支援下載"})}
+function doExpA(){var m=document.getElementById("exm");
+ if(exp.from>exp.to){m.textContent="起日不可晚於迄日";return}
+ var a=recs.filter(function(x){return(!exp.store||shop(x.shop).store==exp.store)&&x.d>=exp.from&&x.d<=exp.to}).reverse();
+ if(!a.length){m.textContent="此區間無資料";return}
+ var rows=[["日期","門店","專櫃編號","專櫃名稱","單據類型","狀態","是否有影像"]].concat(a.map(function(x){var s=shop(x.shop);return [x.d,s.store,x.shop,s.name,tname(x.type),x.st,x.img?"是":"否"]}));
+ var name="單據明細_"+(exp.store||"全部門店")+"_"+exp.from+"_"+exp.to,data,fn;
+ if(window.XLSX){var ws=XLSX.utils.aoa_to_sheet(rows),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"單據明細");data=new Blob([XLSX.write(wb,{bookType:"xlsx",type:"array"})]);fn=name+".xlsx"}
+ else{data="\ufeff"+rows.map(function(r){return r.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"'}).join(",")}).join("\n");fn=name+".csv"}
+ claude.use("downloads").then(function(d){if(!d){m.textContent="目前環境不支援下載";return}
+  d.save({filename:fn,data:data}).then(function(){m.textContent="已匯出 "+a.length+" 筆"},function(e){m.textContent=e.code=="declined"?"已取消":"匯出失敗："+e.code})},function(){m.textContent="目前環境不支援下載"})}
+function up(){var f=document.getElementById("uf").files[0],t=document.getElementById("ut").value;
+ function add(src){recs.unshift({d:today,shop:cur.shop,type:t,st:"已收件",img:src,note:""});render()}
+ if(!f){add("");return}var rd=new FileReader();rd.onload=function(){add(rd.result)};rd.readAsDataURL(f)}
+var flt={store:"",day:"",miss:false};
+function vAdmin(r){var fin=r=="fin";
+ var so='<option value="">全部門店</option>'+STORES.map(function(s){return '<option'+(flt.store==s?" selected":"")+'>'+s+'</option>'}).join("");
+ var list=shops.filter(function(s){return!flt.store||s.store==flt.store});
+ var days=flt.day||today;
+ var sum=list.map(function(s){var have=TYPES.filter(function(t){return t[2]&&recs.some(function(x){return x.shop==s.id&&x.d==days&&x.type==t[0]})}).length;
+  return {s:s,have:have}});
+ if(flt.miss)sum=sum.filter(function(o){return o.have<4});
+ var rows=sum.map(function(o){return '<tr><td>'+o.s.id+'</td><td>'+esc(o.s.name)+'</td><td>'+o.s.store+'</td><td><span class="tag '+(o.have==4?"ok":"bad")+'">必要單據 '+o.have+'/4</span></td></tr>'}).join("");
+ var rs=recs.filter(function(x){return(!flt.store||shop(x.shop).store==flt.store)&&(!flt.day||x.d==flt.day)});
+ return '<div class="card"><div class="row"><select onchange="flt.store=this.value;render()">'+so+'</select><label>日期 <input type="date" value="'+(flt.day||"")+'" onchange="flt.day=this.value;render()"></label><label><input type="checkbox" '+(flt.miss?"checked":"")+' onchange="flt.miss=this.checked;render()"> 只看缺漏</label></div></div>'+
+ '<div class="card"><b>各專櫃每日必要單據（'+days+'）</b><div class="tbl"><table><tr><th>編號</th><th>專櫃</th><th>門店</th><th>狀態</th></tr>'+rows+'</table></div><div class="mu">專櫃總數（POC 示範）：'+shops.length+'；正式規模：汐止180–200、台中180–200、新竹50–60</div></div>'+
+ '<div class="card"><div class="row" style="justify-content:space-between"><b>單據明細</b><button class="ic" title="匯出 EXCEL" aria-label="匯出 EXCEL" onclick="exp.aopen=!exp.aopen;render()">'+XI+'</button></div>'+(exp.aopen?'<div class="row ex"><label>門店 <select onchange="exp.store=this.value"><option value="">全部門店</option>'+STORES.map(function(s){return '<option'+(exp.store==s?" selected":"")+'>'+s+'</option>'}).join("")+'</select></label><label>起 <input type="date" value="'+exp.from+'" onchange="exp.from=this.value"></label><label>迄 <input type="date" value="'+exp.to+'" onchange="exp.to=this.value"></label><button class="p" onclick="doExpA()">匯出 .xlsx</button><span class="mu" id="exm"></span></div>':'')+tbl(rs,fin)+'</div>'+
+ '<div class="card"><b>新增專櫃帳號</b><div class="row" style="margin-top:10px"><input id="nid" placeholder="編號"><input id="nn" placeholder="專櫃名稱"><select id="ns">'+STORES.map(function(s){return '<option>'+s+'</option>'}).join("")+'</select><input id="np" placeholder="初始密碼"><button class="p" onclick="addShop()">新增</button></div></div>'}
+function tbl(a,edit){if(!a.length)return '<p class="mu">尚無資料</p>';
+ return '<div class="tbl"><table><tr><th>日期</th><th>專櫃</th><th>單據</th><th>影像</th><th>狀態</th></tr>'+a.map(function(x){var i=recs.indexOf(x);
+ var st=edit?'<select onchange="recs['+i+'].st=this.value;render()">'+["已收件","已核對","異常"].map(function(v){return '<option'+(v==x.st?" selected":"")+'>'+v+'</option>'}).join("")+'</select>':'<span class="tag ok">'+x.st+'</span>';
+ return '<tr><td>'+x.d+'</td><td>'+esc(shop(x.shop).name)+'</td><td>'+tname(x.type)+'</td><td>'+(x.img?'<img class="th" src="'+x.img+'" alt="單據">':'—')+'</td><td>'+st+'</td></tr>'}).join("")+'</table></div>'}
+function addShop(){var i=nid.value.trim(),n=nn.value.trim();if(!i||!n)return;shops.push({id:i,name:n,store:ns.value,pw:np.value});render()}
+document.getElementById("role").onchange=render;render();
+</script></body></html>
